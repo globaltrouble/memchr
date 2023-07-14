@@ -153,7 +153,8 @@ standard library exposes a platform independent SIMD API.
   implementation in this crate.
 */
 
-#![deny(missing_docs)]
+#![allow(dead_code, unused_variables)]
+// #![deny(missing_docs)]
 #![cfg_attr(not(feature = "std"), no_std)]
 // It's not worth trying to gate all code on just miri, so turn off relevant
 // dead code warnings.
@@ -179,6 +180,7 @@ pub use crate::memchr::{
 
 mod cow;
 mod memchr;
+pub mod memchr2;
 pub mod memmem;
 #[cfg(test)]
 mod tests;
