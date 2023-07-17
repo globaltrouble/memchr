@@ -1,7 +1,7 @@
-use std::iter::repeat;
+use crate::ext::Byte;
 
 /// Create a sequence of tests that should be run by memchr implementations.
-pub fn memchr_tests() -> Vec<MemchrTest> {
+pub(crate) fn memchr_tests() -> Vec<MemchrTest> {
     let mut tests = Vec::new();
     for statict in MEMCHR_TESTS {
         assert!(!statict.corpus.contains("%"), "% is not allowed in corpora");
@@ -118,7 +118,7 @@ const MEMCHR_TESTS: &[MemchrTestStatic] = &[
 
 /// A description of a test on a memchr like function.
 #[derive(Clone, Debug)]
-pub struct MemchrTest {
+pub(crate) struct MemchrTest {
     /// The thing to search. We use `&str` instead of `&[u8]` because they
     /// are nicer to write in tests, and we don't miss much since memchr
     /// doesn't care about UTF-8.
@@ -141,14 +141,44 @@ pub struct MemchrTest {
 
 /// Like MemchrTest, but easier to define as a constant.
 #[derive(Clone, Debug)]
-pub struct MemchrTestStatic {
+pub(crate) struct MemchrTestStatic {
     corpus: &'static str,
     needles: &'static [u8],
     positions: &'static [usize],
 }
 
+/// Controls how many different alignments we check for each test. We lower
+/// this on Miri because otherwise running the tests would take forever.
+const ALIGN_COUNT: usize = {
+    #[cfg(not(miri))]
+    {
+        130
+    }
+    #[cfg(miri)]
+    {
+        4
+    }
+};
+
+/// Controls how much we expand the haystack on either side for each test. We
+/// lower this on Miri because otherwise running the tests would take forever.
+const EXPAND_COUNT: usize = {
+    #[cfg(not(miri))]
+    {
+        515
+    }
+    #[cfg(miri)]
+    {
+        6
+    }
+};
+
 impl MemchrTest {
-    pub fn one<F: Fn(u8, &[u8]) -> Option<usize>>(&self, reverse: bool, f: F) {
+    pub(crate) fn one<F: Fn(u8, &[u8]) -> Option<usize>>(
+        &self,
+        reverse: bool,
+        f: F,
+    ) {
         let needles = match self.needles(1) {
             None => return,
             Some(needles) => needles,
@@ -161,13 +191,13 @@ impl MemchrTest {
         // You might think this would cause most needles to not be found, but
         // we actually expand our tests to include corpus sizes all the way up
         // to >500 bytes, so we should exercise most branches.
-        for align in 0..130 {
+        for align in 0..ALIGN_COUNT {
             let corpus = self.corpus(align);
             assert_eq!(
                 self.positions(align, reverse).get(0).cloned(),
                 f(needles[0], corpus.as_bytes()),
                 "search for {:?} failed in: {:?} (len: {}, alignment: {})",
-                needles[0] as char,
+                needles[0].to_char(),
                 corpus,
                 corpus.len(),
                 align
@@ -175,7 +205,7 @@ impl MemchrTest {
         }
     }
 
-    pub fn two<F: Fn(u8, u8, &[u8]) -> Option<usize>>(
+    pub(crate) fn two<F: Fn(u8, u8, &[u8]) -> Option<usize>>(
         &self,
         reverse: bool,
         f: F,
@@ -184,15 +214,15 @@ impl MemchrTest {
             None => return,
             Some(needles) => needles,
         };
-        for align in 0..130 {
+        for align in 0..ALIGN_COUNT {
             let corpus = self.corpus(align);
             assert_eq!(
                 self.positions(align, reverse).get(0).cloned(),
                 f(needles[0], needles[1], corpus.as_bytes()),
                 "search for {:?}|{:?} failed in: {:?} \
                  (len: {}, alignment: {})",
-                needles[0] as char,
-                needles[1] as char,
+                needles[0].to_char(),
+                needles[1].to_char(),
                 corpus,
                 corpus.len(),
                 align
@@ -200,7 +230,7 @@ impl MemchrTest {
         }
     }
 
-    pub fn three<F: Fn(u8, u8, u8, &[u8]) -> Option<usize>>(
+    pub(crate) fn three<F: Fn(u8, u8, u8, &[u8]) -> Option<usize>>(
         &self,
         reverse: bool,
         f: F,
@@ -209,16 +239,16 @@ impl MemchrTest {
             None => return,
             Some(needles) => needles,
         };
-        for align in 0..130 {
+        for align in 0..ALIGN_COUNT {
             let corpus = self.corpus(align);
             assert_eq!(
                 self.positions(align, reverse).get(0).cloned(),
                 f(needles[0], needles[1], needles[2], corpus.as_bytes()),
                 "search for {:?}|{:?}|{:?} failed in: {:?} \
                  (len: {}, alignment: {})",
-                needles[0] as char,
-                needles[1] as char,
-                needles[2] as char,
+                needles[0].to_char(),
+                needles[1].to_char(),
+                needles[2].to_char(),
                 corpus,
                 corpus.len(),
                 align
@@ -226,7 +256,61 @@ impl MemchrTest {
         }
     }
 
-    pub fn iter_one<'a, I, F>(&'a self, reverse: bool, f: F)
+    pub(crate) fn all_one<F>(&self, reverse: bool, f: F)
+    where
+        F: FnOnce(u8, &[u8]) -> Vec<usize>,
+    {
+        if let Some(ns) = self.needles(1) {
+            assert_eq!(
+                self.positions(0, reverse),
+                f(ns[0], self.corpus.as_bytes()),
+                r"search for {:?} failed in: {:?}",
+                self.needles
+                    .iter()
+                    .map(|&b| b.to_char())
+                    .collect::<Vec<char>>(),
+                self.corpus
+            );
+        }
+    }
+
+    pub(crate) fn all_two<F>(&self, reverse: bool, f: F)
+    where
+        F: FnOnce(u8, u8, &[u8]) -> Vec<usize>,
+    {
+        if let Some(ns) = self.needles(2) {
+            assert_eq!(
+                self.positions(0, reverse),
+                f(ns[0], ns[1], self.corpus.as_bytes()),
+                r"search for {:?} failed in: {:?}",
+                self.needles
+                    .iter()
+                    .map(|&b| b.to_char())
+                    .collect::<Vec<char>>(),
+                self.corpus
+            );
+        }
+    }
+
+    pub(crate) fn all_three<F>(&self, reverse: bool, f: F)
+    where
+        F: FnOnce(u8, u8, u8, &[u8]) -> Vec<usize>,
+    {
+        if let Some(ns) = self.needles(3) {
+            assert_eq!(
+                self.positions(0, reverse),
+                f(ns[0], ns[1], ns[2], self.corpus.as_bytes()),
+                r"search for {:?} failed in: {:?}",
+                self.needles
+                    .iter()
+                    .map(|&b| b.to_char())
+                    .collect::<Vec<char>>(),
+                self.corpus
+            );
+        }
+    }
+
+    pub(crate) fn iter_one<'a, I, F>(&'a self, reverse: bool, f: F)
     where
         F: FnOnce(u8, &'a [u8]) -> I,
         I: Iterator<Item = usize>,
@@ -236,7 +320,7 @@ impl MemchrTest {
         }
     }
 
-    pub fn iter_two<'a, I, F>(&'a self, reverse: bool, f: F)
+    pub(crate) fn iter_two<'a, I, F>(&'a self, reverse: bool, f: F)
     where
         F: FnOnce(u8, u8, &'a [u8]) -> I,
         I: Iterator<Item = usize>,
@@ -246,7 +330,7 @@ impl MemchrTest {
         }
     }
 
-    pub fn iter_three<'a, I, F>(&'a self, reverse: bool, f: F)
+    pub(crate) fn iter_three<'a, I, F>(&'a self, reverse: bool, f: F)
     where
         F: FnOnce(u8, u8, u8, &'a [u8]) -> I,
         I: Iterator<Item = usize>,
@@ -264,7 +348,7 @@ impl MemchrTest {
             self.positions(0, reverse),
             it.collect::<Vec<usize>>(),
             r"search for {:?} failed in: {:?}",
-            self.needles.iter().map(|&b| b as char).collect::<Vec<char>>(),
+            self.needles.iter().map(|&b| b.to_char()).collect::<Vec<char>>(),
             self.corpus
         );
     }
@@ -284,18 +368,19 @@ impl MemchrTest {
         let mut more = Vec::new();
 
         // Add bytes to the start of the corpus.
-        for i in 1..515 {
+        for i in 1..EXPAND_COUNT {
             let mut t = self.clone();
-            let mut new_corpus: String = repeat('%').take(i).collect();
+            let mut new_corpus: String =
+                core::iter::repeat('%').take(i).collect();
             new_corpus.push_str(&t.corpus);
             t.corpus = new_corpus;
             t.positions = t.positions.into_iter().map(|p| p + i).collect();
             more.push(t);
         }
         // Add bytes to the end of the corpus.
-        for i in 1..515 {
+        for i in 1..EXPAND_COUNT {
             let mut t = self.clone();
-            let padding: String = repeat('%').take(i).collect();
+            let padding: String = core::iter::repeat('%').take(i).collect();
             t.corpus.push_str(&padding);
             more.push(t);
         }

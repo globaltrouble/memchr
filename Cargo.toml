@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["memchr", "char", "scan", "strchr", "string"]
 license = "Unlicense OR MIT"
 exclude = ["/bench", "/.github", "/fuzz"]
-edition = "2018"
+edition = "2021"
 
 [workspace]
 members = ["bench"]

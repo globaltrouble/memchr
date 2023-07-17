@@ -1,6 +1,9 @@
 use core::mem::size_of;
 
-use crate::memmem::{util::memcmp, vector::Vector, NeedleInfo};
+use crate::{
+    arch::all::is_equal_raw,
+    memmem::{vector::Vector, NeedleInfo},
+};
 
 /// The minimum length of a needle required for this algorithm. The minimum
 /// is 2 since a length of 1 should just use memchr and a length of 0 isn't
@@ -236,8 +239,7 @@ unsafe fn fwd_find_in_chunk<V: Vector>(
         if end_ptr.sub(needle.len()) < ptr {
             return None;
         }
-        let chunk = core::slice::from_raw_parts(ptr, needle.len());
-        if memcmp(needle, chunk) {
+        if is_equal_raw(needle.as_ptr(), ptr, needle.len()) {
             return Some(offset);
         }
         match_offsets &= match_offsets - 1;

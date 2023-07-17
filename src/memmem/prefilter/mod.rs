@@ -468,7 +468,7 @@ pub(crate) mod tests {
             }
             let ninfo = NeedleInfo {
                 rarebytes: RareNeedleBytes::new(rare1i, rare2i),
-                nhash: rabinkarp::NeedleHash::forward(&needle),
+                rabinkarp: rabinkarp::Finder::new(&needle),
             };
             Some(PrefilterTest { ninfo, haystack, needle, output })
         }

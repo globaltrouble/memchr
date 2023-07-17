@@ -69,11 +69,11 @@ assert_eq!(None, finder.find(b"quux baz bar"));
 pub use self::{byterank::HeuristicFrequencyRank, prefilter::Prefilter};
 
 use crate::{
+    arch::all::rabinkarp,
     cow::CowBytes,
     memmem::{
         byterank::DefaultFrequencyRank,
         prefilter::{Pre, PrefilterFn, PrefilterState},
-        rabinkarp::NeedleHash,
         rarebytes::RareNeedleBytes,
     },
 };
@@ -146,14 +146,12 @@ macro_rules! define_memmem_simple_tests {
     };
 }
 
-mod byterank;
+pub(crate) mod byterank;
 #[cfg(memchr_runtime_simd)]
 mod genericsimd;
-mod prefilter;
-mod rabinkarp;
+pub(crate) mod prefilter;
 mod rarebytes;
 mod twoway;
-mod util;
 #[cfg(memchr_runtime_simd)]
 mod vector;
 #[cfg(all(memchr_runtime_wasm128))]
@@ -259,7 +257,7 @@ pub fn rfind_iter<'h, 'n, N: 'n + ?Sized + AsRef<[u8]>>(
 #[inline]
 pub fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if haystack.len() < 64 {
-        rabinkarp::find(haystack, needle)
+        rabinkarp::Finder::new(needle).find(haystack, needle)
     } else {
         Finder::new(needle).find(haystack)
     }
@@ -296,7 +294,7 @@ pub fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[inline]
 pub fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if haystack.len() < 64 {
-        rabinkarp::rfind(haystack, needle)
+        rabinkarp::FinderRev::new(needle).rfind(haystack, needle)
     } else {
         FinderRev::new(needle).rfind(haystack)
     }
@@ -791,7 +789,7 @@ struct Searcher<'n> {
 ///
 /// We group these things together because it's useful to be able to hand them
 /// to prefilters or substring algorithms that want them.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct NeedleInfo {
     /// The offsets of "rare" bytes detected in the needle.
     ///
@@ -804,16 +802,16 @@ pub(crate) struct NeedleInfo {
     /// Of course, this is only a heuristic based on a background frequency
     /// distribution of bytes. But it tends to work very well in practice.
     pub(crate) rarebytes: RareNeedleBytes,
-    /// A Rabin-Karp hash of the needle.
+    /// A Rabin-Karp finder.
     ///
-    /// This is store here instead of in a more specific Rabin-Karp search
-    /// since Rabin-Karp may be used even if another SearchKind corresponds
-    /// to some other search implementation. e.g., If measurements suggest RK
-    /// is faster in some cases or if a search implementation can't handle
-    /// particularly small haystack. (Moreover, we cannot use RK *generally*,
-    /// since its worst case time is multiplicative. Instead, we only use it
-    /// some small haystacks, where "small" is a constant.)
-    pub(crate) nhash: NeedleHash,
+    /// This is stored here instead of in its own SearcherKind::RabinKarp
+    /// variant since Rabin-Karp may be used as part of another searcher. e.g.,
+    /// If measurements suggest RK is faster in some cases or if a search
+    /// implementation can't handle particularly small haystack. (Moreover, we
+    /// cannot use RK *generally*, since its worst case time is multiplicative.
+    /// Instead, we only use it some small haystacks, where "small" is a
+    /// constant.)
+    pub(crate) rabinkarp: rabinkarp::Finder,
 }
 
 /// Configuration for substring search.
@@ -860,7 +858,12 @@ impl<'n> Searcher<'n> {
                 ranker,
                 needle,
             );
-            Searcher { needle: CowBytes::new(needle), ninfo, prefn, kind }
+            Searcher {
+                needle: CowBytes::new(needle),
+                ninfo: ninfo.clone(),
+                prefn,
+                kind,
+            }
         };
         if needle.len() == 0 {
             return mk(Empty);
@@ -925,7 +928,7 @@ impl<'n> Searcher<'n> {
         };
         Searcher {
             needle: CowBytes::new(self.needle()),
-            ninfo: self.ninfo,
+            ninfo: self.ninfo.clone(),
             prefn: self.prefn,
             kind,
         }
@@ -978,7 +981,7 @@ impl<'n> Searcher<'n> {
                 // For very short haystacks (e.g., where the prefilter probably
                 // can't run), it's faster to just run RK.
                 if rabinkarp::is_fast(haystack, needle) {
-                    rabinkarp::find_with(&self.ninfo.nhash, haystack, needle)
+                    self.ninfo.rabinkarp.find(haystack, needle)
                 } else {
                     self.find_tw(tw, state, haystack, needle)
                 }
@@ -988,7 +991,7 @@ impl<'n> Searcher<'n> {
                 // The SIMD matcher can't handle particularly short haystacks,
                 // so we fall back to RK in these cases.
                 if haystack.len() < gs.min_haystack_len() {
-                    rabinkarp::find_with(&self.ninfo.nhash, haystack, needle)
+                    self.ninfo.rabinkarp.find(haystack, needle)
                 } else {
                     gs.find(haystack, needle)
                 }
@@ -1002,7 +1005,7 @@ impl<'n> Searcher<'n> {
                 // The SIMD matcher can't handle particularly short haystacks,
                 // so we fall back to RK in these cases.
                 if haystack.len() < gs.min_haystack_len() {
-                    rabinkarp::find_with(&self.ninfo.nhash, haystack, needle)
+                    self.ninfo.rabinkarp.find(haystack, needle)
                 } else {
                     gs.find(haystack, needle)
                 }
@@ -1049,7 +1052,7 @@ impl NeedleInfo {
     ) -> NeedleInfo {
         NeedleInfo {
             rarebytes: RareNeedleBytes::forward(ranker, needle),
-            nhash: NeedleHash::forward(needle),
+            rabinkarp: rabinkarp::Finder::new(needle),
         }
     }
 }
@@ -1065,8 +1068,8 @@ impl NeedleInfo {
 struct SearcherRev<'n> {
     /// The actual needle we're searching for.
     needle: CowBytes<'n>,
-    /// A Rabin-Karp hash of the needle.
-    nhash: NeedleHash,
+    /// A Rabin-Karp finder.
+    rabinkarp: rabinkarp::FinderRev,
     /// The actual substring implementation in use.
     kind: SearcherRevKind,
 }
@@ -1098,7 +1101,7 @@ impl<'n> SearcherRev<'n> {
         };
         SearcherRev {
             needle: CowBytes::new(needle),
-            nhash: NeedleHash::reverse(needle),
+            rabinkarp: rabinkarp::FinderRev::new(needle),
             kind,
         }
     }
@@ -1117,7 +1120,7 @@ impl<'n> SearcherRev<'n> {
         };
         SearcherRev {
             needle: CowBytes::new(self.needle()),
-            nhash: self.nhash,
+            rabinkarp: self.rabinkarp.clone(),
             kind,
         }
     }
@@ -1133,7 +1136,7 @@ impl<'n> SearcherRev<'n> {
         };
         SearcherRev {
             needle: self.needle.into_owned(),
-            nhash: self.nhash,
+            rabinkarp: self.rabinkarp,
             kind,
         }
     }
@@ -1156,7 +1159,7 @@ impl<'n> SearcherRev<'n> {
                 // For very short haystacks (e.g., where the prefilter probably
                 // can't run), it's faster to just run RK.
                 if rabinkarp::is_fast(haystack, needle) {
-                    rabinkarp::rfind_with(&self.nhash, haystack, needle)
+                    self.rabinkarp.rfind(haystack, needle)
                 } else {
                     tw.rfind(haystack, needle)
                 }

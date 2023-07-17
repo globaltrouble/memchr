@@ -5,8 +5,8 @@ mod default;
 ///
 /// The use of this trait can have a dramatic impact on performance depending
 /// on the type of data being searched. The details of why are explained in the
-/// docs of [`prefilter::Prefilter`]. To summarize, the core algorithm uses a
-/// prefilter to quickly identify candidate matches that are later verified
+/// docs of [`crate::memmem::Prefilter`]. To summarize, the core algorithm uses
+/// a prefilter to quickly identify candidate matches that are later verified
 /// more slowly. This prefilter is implemented in terms of trying to find
 /// `rare` bytes at specific offsets that will occur less frequently in the
 /// dataset. While the concept of a `rare` byte is similar for most datasets,

@@ -18,7 +18,7 @@ pub(crate) struct RareNeedleBytes {
     /// The leftmost offset of the rarest byte in the needle, according to
     /// pre-computed frequency analysis. The "leftmost offset" means that
     /// rare1i <= i for all i where needle[i] == needle[rare1i].
-    rare1i: u8,
+    pub(crate) rare1i: u8,
     /// The leftmost offset of the second rarest byte in the needle, according
     /// to pre-computed frequency analysis. The "leftmost offset" means that
     /// rare2i <= i for all i where needle[i] == needle[rare2i].
@@ -33,7 +33,7 @@ pub(crate) struct RareNeedleBytes {
     /// byte needle is handled specially by memchr itself, rare2i generally
     /// always should be different from rare1i since it would otherwise be
     /// ineffective as a guard.
-    rare2i: u8,
+    pub(crate) rare2i: u8,
 }
 
 impl RareNeedleBytes {

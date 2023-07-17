@@ -1,5 +1,8 @@
-mod memchr;
+pub(crate) mod memchr;
 mod memchr2;
+pub(crate) mod packedpair;
+#[macro_use]
+pub(crate) mod substring;
 
 // For debugging, particularly in CI, print out the byte order of the current
 // target.
