@@ -15,7 +15,7 @@ fn main() {
 // is not a problem. In that case, the fastest option will be chosen at
 // runtime.
 fn enable_simd_optimizations() {
-    if is_env_set("CARGO_CFG_MEMCHR_DISABLE_AUTO_SIMD") {
+    if !is_feature_set("AUTO_SIMD") {
         return;
     }
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();

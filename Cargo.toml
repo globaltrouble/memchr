@@ -20,7 +20,7 @@ name = "memchr"
 bench = false
 
 [features]
-default = ["std"]
+default = []
 
 # The 'std' feature permits the memchr crate to use the standard library. This
 # permits this crate to use runtime CPU feature detection to automatically
@@ -35,11 +35,14 @@ alloc = []
 
 # The 'use_std' feature is DEPRECATED. It will be removed in memchr 3. Until
 # then, it is alias for the 'std' feature.
-use_std = ["std"]
+use_std = []
+# use_std = ["std"]
 
 # Internal feature, only used when building as part of libstd, not part of the
 # stable interface of this crate.
 rustc-dep-of-std = ['core', 'compiler_builtins']
+
+auto_simd = []
 
 [dependencies]
 libc = { version = "0.2.18", default-features = false, optional = true }
